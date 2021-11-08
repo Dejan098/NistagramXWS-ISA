@@ -1,0 +1,414 @@
+package com.example.PostService.Service;
+
+import com.example.PostService.Model.RegistrovaniKorisnik;
+import com.example.PostService.Model.Sadrzaj;
+import com.example.PostService.Repository.SadrzajRepository;
+import org.apache.catalina.realm.UserDatabaseRealm;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Service;
+import com.example.PostService.Model.Lokacija;
+import com.example.PostService.Model.Tagovi;
+import com.example.PostService.Repository.LokacijaRepository;
+import com.example.PostService.Repository.RegistrovaniKorisnikRepository;
+import com.example.PostService.Repository.SadrzajRepository;
+import com.example.PostService.Repository.TagRepository;
+import com.example.PostService.Model.*;
+import com.example.PostService.Repository.*;
+import org.apache.commons.io.FilenameUtils;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.stereotype.Service;
+import org.springframework.util.StringUtils;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.client.RestTemplate;
+import org.springframework.web.multipart.MultipartFile;
+
+import java.io.File;
+import java.io.IOException;
+import java.io.InputStream;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.nio.file.StandardCopyOption;
+import java.util.*;
+
+import javax.persistence.Id;
+
+
+@Service
+public class SadrzajService {
+    private SadrzajRepository sadrzajRepository;
+    private LokacijaRepository lokacijaRepository;
+    private TagRepository tagRepository;
+    private RegistrovaniKorisnikRepository registrovaniKorisnikRepository;
+    private PostRepository postRepository;
+    private SlikaRepository slikaRepository;
+
+    @Autowired
+    public SadrzajRepository setSadrzajRepository(SadrzajRepository sadrzajRepository) { return this.sadrzajRepository = sadrzajRepository; }
+
+    @Autowired
+    public LokacijaRepository setLokacijaRepository(LokacijaRepository lokacijaRepository) { return this.lokacijaRepository = lokacijaRepository; }
+
+    @Autowired
+    public TagRepository setTagRepository(TagRepository tagRepository)
+    {
+        return this.tagRepository = tagRepository;
+    }
+
+    @Autowired
+    public RegistrovaniKorisnikRepository setRegistrovaniKorisnikRepository(RegistrovaniKorisnikRepository registrovaniKorisnikRepository) { return this.registrovaniKorisnikRepository = registrovaniKorisnikRepository; }
+
+    @Autowired
+    public PostRepository setPostRepository(PostRepository postRepository) {return this.postRepository = postRepository; }
+
+    @Autowired
+    public SlikaRepository setSlikaRepository(SlikaRepository slikaRepository) { return this.slikaRepository = slikaRepository; }
+
+    @Autowired
+    private RestTemplate restTemplate;
+
+    @Autowired
+    private  ReklamaRepository reklamaRepository;
+
+    @Autowired
+    private AgentRepository agentRepository;
+
+    public List<Sadrzaj> findByLokacija(String lokacija, String token) {
+        Lokacija lokacija1 = lokacijaRepository.findByNaziv(lokacija);
+        List<Post> posts = postRepository.findByLokacija(lokacija1);
+        List<Reklama> reklamas = reklamaRepository.findByLokacija(lokacija1);
+        List<Sadrzaj> sadrzajs = new ArrayList<>();
+
+        StringDTO stringDTO = new StringDTO(token);
+        ListIntegerWrapper following= restTemplate.postForObject("http://followerservice/follower/getFollowing", stringDTO, ListIntegerWrapper.class);
+        ListIntegerWrapper publics = restTemplate.postForObject("http://followerservice/follower/getPublic",new IdDTO(2), ListIntegerWrapper.class);
+
+        for (Post post : posts) {
+            if (following.getIntegerList().contains(post.getKreator().getId()) || publics.getIntegerList().contains(post.getKreator().getId())) {
+                sadrzajs.add(post);
+            }
+        }
+
+        for (Reklama reklama : reklamas) {
+            if (following.getIntegerList().contains(reklama.getKreator().getId()) || publics.getIntegerList().contains(reklama.getKreator().getId())) {
+                sadrzajs.add(reklama);
+            }
+        }
+
+        sadrzajs.removeIf(s -> s.getUklonjeno().equals(true));
+
+        return sadrzajs;
+    }
+
+    public List<Sadrzaj> findByTag(String tag, String token) {
+        Tagovi tagovi = tagRepository.findByNaziv(tag);
+
+        List<Post> posts = postRepository.findByTagovi(tagovi);
+        List<Reklama> reklamas = reklamaRepository.findByTagovi(tagovi);
+        List<Sadrzaj> sadrzajs = new ArrayList<>();
+
+        StringDTO stringDTO = new StringDTO(token);
+        ListIntegerWrapper following= restTemplate.postForObject("http://followerservice/follower/getFollowing", stringDTO, ListIntegerWrapper.class);
+        ListIntegerWrapper publics = restTemplate.postForObject("http://followerservice/follower/getPublic",new IdDTO(2), ListIntegerWrapper.class);
+
+        for (Post post : posts) {
+            if (following.getIntegerList().contains(post.getKreator().getId()) || publics.getIntegerList().contains(post.getKreator().getId())) {
+                sadrzajs.add(post);
+            }
+        }
+
+        for (Reklama reklama : reklamas) {
+            if (following.getIntegerList().contains(reklama.getKreator().getId()) || publics.getIntegerList().contains(reklama.getKreator().getId())) {
+                sadrzajs.add(reklama);
+            }
+        }
+
+        sadrzajs.removeIf(s -> s.getUklonjeno().equals(true));
+
+        return sadrzajs;
+    }
+
+    public List<Sadrzaj> findByProfil(String username, String token) {
+        RegistrovaniKorisnik registrovaniKorisnik = registrovaniKorisnikRepository.findOneByUsername(username);
+        List<Reklama> reklamas = new ArrayList<>();
+        List<Post> posts = postRepository.findByKreator(registrovaniKorisnik);
+        if (registrovaniKorisnik instanceof Agent) {
+            Agent agent = agentRepository.findByUsername(username);
+            reklamas = reklamaRepository.findByKreator(agent);
+        }
+        List<Sadrzaj> sadrzajs = new ArrayList<>();
+
+        StringDTO stringDTO = new StringDTO(token);
+        ListIntegerWrapper following= restTemplate.postForObject("http://followerservice/follower/getFollowing", stringDTO, ListIntegerWrapper.class);
+        ListIntegerWrapper publics = restTemplate.postForObject("http://followerservice/follower/getPublic",new IdDTO(2), ListIntegerWrapper.class);
+
+        for (Post post : posts) {
+            if (following.getIntegerList().contains(post.getKreator().getId()) || publics.getIntegerList().contains(post.getKreator().getId())) {
+                sadrzajs.add(post);
+            }
+        }
+
+        for (Reklama reklama : reklamas) {
+            if (following.getIntegerList().contains(reklama.getKreator().getId()) || publics.getIntegerList().contains(reklama.getKreator().getId())) {
+                sadrzajs.add(reklama);
+            }
+        }
+
+        sadrzajs.removeIf(s -> s.getUklonjeno().equals(true));
+
+        return sadrzajs;
+    }
+
+    public List<Sadrzaj> findByLokacijaNotLogged(String lokacija) {
+        Lokacija lokacija1 = lokacijaRepository.findByNaziv(lokacija);
+        List<Post> posts = postRepository.findByLokacija(lokacija1);
+        List<Reklama> reklamas = reklamaRepository.findByLokacija(lokacija1);
+        List<Sadrzaj> sadrzajs = new ArrayList<>();
+
+        ListIntegerWrapper publics = restTemplate.postForObject("http://followerservice/follower/getPublic",new IdDTO(2), ListIntegerWrapper.class);
+
+        for (Post post : posts) {
+            if (publics.getIntegerList().contains(post.getKreator().getId())) {
+                sadrzajs.add(post);
+            }
+        }
+
+        for (Reklama reklama : reklamas) {
+            if (publics.getIntegerList().contains(reklama.getKreator().getId())) {
+                sadrzajs.add(reklama);
+            }
+        }
+
+        sadrzajs.removeIf(s -> s.getUklonjeno().equals(true));
+
+        return sadrzajs;
+    }
+
+    public List<Sadrzaj> findByTagNotLogged(String tag) {
+        Tagovi tagovi = tagRepository.findByNaziv(tag);
+
+        List<Post> posts = postRepository.findByTagovi(tagovi);
+        List<Reklama> reklamas = reklamaRepository.findByTagovi(tagovi);
+        List<Sadrzaj> sadrzajs = new ArrayList<>();
+
+        ListIntegerWrapper publics = restTemplate.postForObject("http://followerservice/follower/getPublic",new IdDTO(2), ListIntegerWrapper.class);
+
+        for (Post post : posts) {
+            if (publics.getIntegerList().contains(post.getKreator().getId())) {
+                sadrzajs.add(post);
+            }
+        }
+
+        for (Reklama reklama : reklamas) {
+            if (publics.getIntegerList().contains(reklama.getKreator().getId())) {
+                sadrzajs.add(reklama);
+            }
+        }
+
+        sadrzajs.removeIf(s -> s.getUklonjeno().equals(true));
+
+        return sadrzajs;
+    }
+
+    public List<Sadrzaj> findByProfilNotLogged(String username) {
+        RegistrovaniKorisnik registrovaniKorisnik = registrovaniKorisnikRepository.findOneByUsername(username);
+        List<Reklama> reklamas = new ArrayList<>();
+        List<Post> posts = postRepository.findByKreator(registrovaniKorisnik);
+        if (registrovaniKorisnik instanceof Agent) {
+            Agent agent = agentRepository.findByUsername(username);
+            reklamas = reklamaRepository.findByKreator(agent);
+        }
+        List<Sadrzaj> sadrzajs = new ArrayList<>();
+
+        ListIntegerWrapper publics = restTemplate.postForObject("http://followerservice/follower/getPublic",new IdDTO(2), ListIntegerWrapper.class);
+
+        for (Post post : posts) {
+            if (publics.getIntegerList().contains(post.getKreator().getId())) {
+                sadrzajs.add(post);
+            }
+        }
+
+        for (Reklama reklama : reklamas) {
+            if (publics.getIntegerList().contains(reklama.getKreator().getId())) {
+                sadrzajs.add(reklama);
+            }
+        }
+
+        sadrzajs.removeIf(s -> s.getUklonjeno().equals(true));
+
+        return sadrzajs;
+    }
+
+    public Sadrzaj like(Integer id, Integer userId) {
+        Sadrzaj sadrzaj = sadrzajRepository.findOneById(id);
+        RegistrovaniKorisnik registrovaniKorisnik = registrovaniKorisnikRepository.findOneById(userId);
+
+        Set<RegistrovaniKorisnik> lajkovali = sadrzaj.getLajkovali();
+        Set<RegistrovaniKorisnik> dislajkovali = sadrzaj.getDislajkovali();
+
+        lajkovali.add(registrovaniKorisnik);
+
+        dislajkovali.remove(registrovaniKorisnik);
+        sadrzaj.setLajkovali(lajkovali);
+        sadrzaj.setDislajkovali(dislajkovali);
+
+        Set<Sadrzaj> lajkovano = registrovaniKorisnik.getSadrzajlajkovani();
+        Set<Sadrzaj> dislajkovano = registrovaniKorisnik.getDislajkovan();
+
+        lajkovano.add(sadrzaj);
+        dislajkovano.remove(sadrzaj);
+
+        registrovaniKorisnik.setSadrzajlajkovani(lajkovano);
+        registrovaniKorisnik.setDislajkovan(dislajkovano);
+
+        registrovaniKorisnikRepository.save(registrovaniKorisnik);
+
+        return sadrzajRepository.save(sadrzaj);
+    }
+
+    public Sadrzaj dislike(Integer id, Integer userId) {
+        Sadrzaj sadrzaj = sadrzajRepository.findOneById(id);
+        RegistrovaniKorisnik registrovaniKorisnik = registrovaniKorisnikRepository.findOneById(userId);
+        Set<RegistrovaniKorisnik> lajkovali = sadrzaj.getLajkovali();
+        Set<RegistrovaniKorisnik> dislajkovali = sadrzaj.getDislajkovali();
+
+        lajkovali.remove(registrovaniKorisnik);
+        dislajkovali.add(registrovaniKorisnik);
+        sadrzaj.setDislajkovali(dislajkovali);
+        sadrzaj.setLajkovali(lajkovali);
+
+        Set<Sadrzaj> lajkovano = registrovaniKorisnik.getSadrzajlajkovani();
+        Set<Sadrzaj> dislajkovano = registrovaniKorisnik.getDislajkovan();
+
+        lajkovano.remove(sadrzaj);
+        dislajkovano.add(sadrzaj);
+
+        registrovaniKorisnik.setSadrzajlajkovani(lajkovano);
+        registrovaniKorisnik.setDislajkovan(dislajkovano);
+
+        registrovaniKorisnikRepository.save(registrovaniKorisnik);
+
+        return sadrzajRepository.save(sadrzaj);
+    }
+
+    public String prijaviNeprikladanSadrzaj(IdDTO sadrzajDTO) {
+        Sadrzaj sadrzaj = sadrzajRepository.findOneById(sadrzajDTO.getId());
+        sadrzaj.setBrojreportova(sadrzaj.getBrojreportova() + 1);
+        sadrzajRepository.save(sadrzaj);
+        String s = "Uspesno ste prijavili neprikladan sadrzaj";
+        return s;
+    }
+
+    public Integer upload (MultipartFile multipartFile) throws IOException {
+        try {
+            String filename = StringUtils.cleanPath(multipartFile.getOriginalFilename());
+            Slika slika = new Slika();
+            slika.setName(filename);
+            slika.setUrl(multipartFile.getBytes());
+            slika.setSize(multipartFile.getSize());
+
+            slika = slikaRepository.save(slika);
+            return slika.getId();
+        } catch(Exception e) {
+            return null;
+        }
+    }
+
+    public Set<SadrzajReturnDTO> getPictures(Integer id){
+        RegistrovaniKorisnik registrovaniKorisnik=registrovaniKorisnikRepository.findOneById(id);
+        Set<SadrzajReturnDTO> sadrzajReturnDTOS= new HashSet<>();
+        for (Post post : registrovaniKorisnik.getPosts()) {
+            if(post.getUklonjeno().equals(false)){
+                SadrzajReturnDTO sadrzajReturnDTO = new SadrzajReturnDTO(post.getId(), post.getKreator(),
+                        post.getBrojreportova(), post.getLajkovali(), post.getDislajkovali(), post.getLokacija(),
+                        post.getSlike(), post.getTagovi());
+                sadrzajReturnDTOS.add(sadrzajReturnDTO);
+            }
+        }
+
+        //dodaj reklame kasnije
+        return sadrzajReturnDTOS;
+    }
+
+    public Set<SadrzajReturnDTO> getsadrzajKorisnikLajkovao(Integer id){
+        RegistrovaniKorisnik registrovaniKorisnik=registrovaniKorisnikRepository.findOneById(id);
+        Set<SadrzajReturnDTO> sadrzajReturnDTOS = new HashSet<>();
+        List<Post> posts = postRepository.findAll();
+        for (Post post: posts) {
+            if(post.getLajkovali().contains(registrovaniKorisnik) && post.getUklonjeno().equals(false)){
+                SadrzajReturnDTO sadrzajReturnDTO = new SadrzajReturnDTO(post.getId(), post.getKreator(),
+                        post.getBrojreportova(), post.getLajkovali(), post.getDislajkovali(), post.getLokacija(),
+                        post.getSlike(), post.getTagovi());
+                sadrzajReturnDTOS.add(sadrzajReturnDTO);
+            }
+        }
+
+        return sadrzajReturnDTOS;
+
+    }
+
+    public Set<SadrzajReturnDTO> getsadrzajKorisnikDislajkovao(Integer id){
+        RegistrovaniKorisnik registrovaniKorisnik=registrovaniKorisnikRepository.findOneById(id);
+        Set<SadrzajReturnDTO> sadrzajReturnDTOS = new HashSet<>();
+        List<Post> posts = postRepository.findAll();
+        for (Post post: posts) {
+            if(post.getDislajkovali().contains(registrovaniKorisnik) && post.getUklonjeno().equals(false)){
+                SadrzajReturnDTO sadrzajReturnDTO = new SadrzajReturnDTO(post.getId(), post.getKreator(),
+                        post.getBrojreportova(), post.getLajkovali(), post.getDislajkovali(), post.getLokacija(),
+                        post.getSlike(), post.getTagovi());
+                sadrzajReturnDTOS.add(sadrzajReturnDTO);
+            }
+        }
+
+        return sadrzajReturnDTOS;
+
+    }
+
+    public List<Sadrzaj> getAllNotLogged() {
+        List<Post> posts = postRepository.findAll();
+        List<Sadrzaj> sadrzajs = new ArrayList<>();
+
+        ListIntegerWrapper publics = restTemplate.postForObject("http://followerservice/follower/getPublic",new IdDTO(2), ListIntegerWrapper.class);
+
+        for (Post post : posts) {
+            if (publics.getIntegerList().contains(post.getKreator().getId())) {
+                sadrzajs.add(post);
+            }
+        }
+
+        sadrzajs.removeIf(s -> s.getUklonjeno().equals(true));
+
+        return sadrzajs;
+    }
+
+    public List<Sadrzaj> getAll(String token) {
+        List<Post> posts = postRepository.findAll();
+        //List<Reklama> reklamas = reklamaRepository.findAll();
+        List<Sadrzaj> sadrzajs = new ArrayList<>();
+
+        StringDTO stringDTO = new StringDTO(token);
+        //ListIntegerWrapper following= restTemplate.postForObject("http://followerservice/follower/getFollowing", stringDTO, ListIntegerWrapper.class);
+        ListIntegerWrapper publics = restTemplate.postForObject("http://followerservice/follower/getPublic",new IdDTO(2), ListIntegerWrapper.class);
+
+        for (Post post : posts) {
+            if (publics.getIntegerList().contains(post.getKreator().getId())) {
+                sadrzajs.add(post);
+            }
+        }
+
+        /*for (Reklama reklama : reklamas) {
+            if (following.getIntegerList().contains(reklama.getKreator().getId()) || publics.getIntegerList().contains(reklama.getKreator().getId())) {
+                sadrzajs.add(reklama);
+            }
+        }*/
+
+        sadrzajs.removeIf(s -> s.getUklonjeno().equals(true));
+
+        return sadrzajs;
+    }
+
+
+
+}
